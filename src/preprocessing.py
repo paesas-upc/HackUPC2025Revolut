@@ -18,7 +18,7 @@ def load_and_clean_data(file_path="data/transactions.csv"):
         df = df.drop(columns=["Unnamed: 0"])
 
     # Convertir columna de fecha
-    df["timestamp"] = pd.to_datetime(df["timestamp"])
+    df["timestamp"] = pd.to_datetime(df["timestamp"], dayfirst=True)
     df["date"] = df["timestamp"].dt.date
     df["hour"] = df["timestamp"].dt.hour
 
