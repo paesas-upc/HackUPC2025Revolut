@@ -19,7 +19,14 @@ def cluster_locations(df, min_cluster_size=5, method='hdbscan'):
     Returns:
         DataFrame con columna cluster añadida
     """
+    # Obtener coordenadas únicas
     coords = df[['latitude', 'longitude']].drop_duplicates().values
+    
+    # Verificar si hay suficientes puntos para hacer clustering
+    if len(coords) < min_cluster_size:
+        # Si no hay suficientes puntos, asignar todos al mismo cluster (0)
+        df['cluster'] = 0
+        return df
     
     if method == 'hdbscan':
         clusterer = hdbscan.HDBSCAN(
@@ -77,22 +84,94 @@ def analyze_clusters(df):
     if 'cluster' not in df.columns:
         raise ValueError("El DataFrame debe tener una columna 'cluster'. Ejecuta cluster_locations primero.")
     
+    # Si todos los puntos tienen el mismo cluster o no hay suficientes datos
+    if df['cluster'].nunique() <= 1 or len(df) < 3:
+        # Verificar que hay datos antes de calcular estadísticas
+        if len(df) > 0:
+            try:
+                dominant_category = df['merchant_category'].value_counts().index[0]
+            except (IndexError, KeyError):
+                dominant_category = 'Desconocido'
+                
+            stats = pd.DataFrame({
+                'cluster': [0],
+                'avg_spent': [df['amount'].mean()],
+                'total_spent': [df['amount'].sum()],
+                'transaction_count': [len(df)],
+                'avg_lat': [df['latitude'].mean()],
+                'avg_lon': [df['longitude'].mean()],
+                'dominant_category': [dominant_category],
+                'category_diversity': [len(df['merchant_category'].unique())],
+                'avg_hour': [df['hour'].mean() if 'hour' in df.columns else 12]
+            })
+        else:
+            # Si no hay datos, crear un DataFrame con valores por defecto
+            stats = pd.DataFrame({
+                'cluster': [0],
+                'avg_spent': [0],
+                'total_spent': [0],
+                'transaction_count': [0],
+                'avg_lat': [0],
+                'avg_lon': [0],
+                'dominant_category': ['Desconocido'],
+                'category_diversity': [0],
+                'avg_hour': [12]
+            })
+        
+        stats['center_coords'] = list(zip(stats['avg_lat'], stats['avg_lon']))
+        return stats
+    
+    # Para casos con múltiples clusters, proceder con el análisis normal
     # Filtrar puntos sin cluster (-1)
     df_clustered = df[df['cluster'] != -1]
     
+    # Si después de filtrar no quedan datos, crear un dataframe vacío con la estructura correcta
+    if df_clustered.empty:
+        stats = pd.DataFrame({
+                'cluster': [0],
+                'avg_spent': [0],
+                'total_spent': [0],
+                'transaction_count': [0],
+                'avg_lat': [0],
+                'avg_lon': [0],
+                'dominant_category': ['Desconocido'],
+                'category_diversity': [0],
+                'avg_hour': [12]
+            })
+        stats['center_coords'] = list(zip(stats['avg_lat'], stats['avg_lon']))
+        return stats
+    
     # Análisis por cluster
-    cluster_stats = df_clustered.groupby('cluster').agg(
-        avg_spent=('amount', 'mean'),
-        total_spent=('amount', 'sum'),
-        transaction_count=('amount', 'count'),
-        avg_lat=('latitude', 'mean'),
-        avg_lon=('longitude', 'mean'),
-        dominant_category=('merchant_category', lambda x: x.value_counts().index[0]),
-        category_diversity=('merchant_category', lambda x: len(x.unique())),
-        avg_hour=('hour', 'mean')
-    ).reset_index()
+    try:
+        cluster_stats = df_clustered.groupby('cluster').agg(
+            avg_spent=('amount', 'mean'),
+            total_spent=('amount', 'sum'),
+            transaction_count=('amount', 'count'),
+            avg_lat=('latitude', 'mean'),
+            avg_lon=('longitude', 'mean'),
+            dominant_category=('merchant_category', lambda x: x.value_counts().index[0] if len(x) > 0 else 'Desconocido'),
+            category_diversity=('merchant_category', lambda x: len(x.unique())),
+            avg_hour=('hour', 'mean' if 'hour' in df.columns else lambda x: 12)
+        ).reset_index()
+        
+        # Calcular centro geográfico de cada cluster
+        cluster_stats['center_coords'] = list(zip(cluster_stats['avg_lat'], cluster_stats['avg_lon']))
+        
+        return cluster_stats
     
-    # Calcular centro geográfico de cada cluster
-    cluster_stats['center_coords'] = list(zip(cluster_stats['avg_lat'], cluster_stats['avg_lon']))
-    
-    return cluster_stats
+    except Exception as e:
+        # En caso de error, devolver un DataFrame básico
+        print(f"Error en analyze_clusters: {str(e)}")
+        stats = pd.DataFrame({
+            'cluster': [0],
+            'avg_spent': [df['amount'].mean() if 'amount' in df.columns else 0],
+            'total_spent': [df['amount'].sum() if 'amount' in df.columns else 0],
+            'transaction_count': [len(df)],
+            'avg_lat': [df['latitude'].mean() if 'latitude' in df.columns else 0],
+            'avg_lon': [df['longitude'].mean() if 'longitude' in df.columns else 0],
+            'dominant_category': ['Desconocido'],
+            'category_diversity': [0],
+            'avg_hour': [12]
+        })
+        stats['center_coords'] = list(zip(stats['avg_lat'], stats['avg_lon']))
+        return stats
