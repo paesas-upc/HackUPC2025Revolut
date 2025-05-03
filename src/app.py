@@ -131,10 +131,10 @@ def main(user_first_name=None, user_last_name=None):
         with map_tab:
             st.subheader("Mapa de transacciones")
             
-            # Opción para mostrar ubicaciones de usuario, comercios o ambos
+            # Opción para mostrar ubicaciones de usuario, comercio
             show_option = st.radio(
                 "Mostrar ubicaciones de:",
-                ["Usuario", "Comercios", "Ambos"],
+                ["Usuario", "Comercios"],
                 horizontal=True
             )
             
@@ -144,7 +144,7 @@ def main(user_first_name=None, user_last_name=None):
                                 'merchant_longitude' in filtered_df.columns and 
                                 filtered_df['merchant_longitude'].notna().any())
             
-            if not has_merchant_coords and show_option in ["Comercios", "Ambos"]:
+            if not has_merchant_coords and show_option in ["Comercios"]:
                 st.warning("No hay coordenadas de comercios disponibles en los datos.")
                 show_option = "Usuario"
             
@@ -161,7 +161,7 @@ def main(user_first_name=None, user_last_name=None):
             merchant_marker_cluster = MarkerCluster(name="Ubicaciones de comercios").add_to(m)
             
             # Mostrar ubicaciones de usuario
-            if show_option in ["Usuario", "Ambos"]:
+            if show_option in ["Usuario"]:
                 # Agregación por ubicación de usuario
                 user_agg = aggregate_by_location(filtered_df, include_merchant=False)
                 
@@ -185,7 +185,7 @@ def main(user_first_name=None, user_last_name=None):
                     ).add_to(user_marker_cluster)
             
             # Mostrar ubicaciones de comercios
-            if show_option in ["Comercios", "Ambos"] and has_merchant_coords:
+            if show_option in ["Comercios"] and has_merchant_coords:
                 # Agregación por ubicación de comercio
                 merchant_agg = aggregate_by_location(filtered_df, include_merchant=True)
                 
@@ -207,28 +207,6 @@ def main(user_first_name=None, user_last_name=None):
                         icon=folium.Icon(color="red", icon="shopping-cart", prefix="fa"),
                         tooltip=f"Comercio - {row['merchant_category']}: ${row['total_spent']:.2f}"
                     ).add_to(merchant_marker_cluster)
-            
-            # Si mostramos ambos y hay datos de comercio, añadir líneas entre usuario y comercio
-            if show_option == "Ambos" and has_merchant_coords:
-                # Agrupar transacciones por par usuario-comercio
-                for _, transaction in filtered_df.iterrows():
-                    if pd.notna(transaction['merchant_latitude']) and pd.notna(transaction['merchant_longitude']):
-                        # Crear línea desde usuario a comercio
-                        points = [
-                            (transaction['latitude'], transaction['longitude']),
-                            (transaction['merchant_latitude'], transaction['merchant_longitude'])
-                        ]
-                        
-                        # Color basado en categoría
-                        color = cat_colors.get(transaction['merchant_category'], 'gray')
-                        
-                        folium.PolyLine(
-                            points, 
-                            color=color,
-                            weight=2,
-                            opacity=0.7,
-                            tooltip=f"Distancia: {transaction.get('distance_to_merchant', 0):.2f} km"
-                        ).add_to(m)
             
             # Añadir control de capas para activar/desactivar grupo de marcadores
             folium.LayerControl().add_to(m)
