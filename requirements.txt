@@ -1,7 +1,24 @@
+# UI Framework
 streamlit
-pandas
-folium
 streamlit-folium
-hdbscan
+
+# Data manipulation
+pandas
+numpy
+
+# Geospatial processing
+folium
 geopandas
+geopy
+
+# Machine learning
 scikit-learn
+hdbscan
+
+# Visualization
+plotly
+matplotlib
+seaborn
+
+# Date/Time handling
+pytz
