@@ -22,3 +22,6 @@ seaborn
 
 # Date/Time handling
 pytz
+
+# Serialization for LinUCB model
+pickle-mixin

@@ -14,7 +14,7 @@ import plotly.graph_objects as go
 
 from preprocessing import load_and_clean_data, aggregate_by_location, aggregate_by_time_location
 from geocluster import cluster_locations, analyze_clusters
-from insights import identify_spending_patterns, generate_user_insights, find_alternative_merchants, find_closest_alternatives
+from insights import record_merchant_feedback, identify_spending_patterns, generate_user_insights, find_alternative_merchants, find_closest_alternatives
 
 # Definir la función get_distinct_colors a nivel global para que esté disponible en todo el script
 def get_distinct_colors(n):
@@ -489,6 +489,7 @@ def main(user_first_name=None, user_last_name=None):
             # Slider para distancia máxima
             max_distance = st.slider("Distancia máxima (km):", 0.5, 10.0, 5.0, 0.5)
             
+            
             # Botón para buscar alternativas
             if st.button("Buscar alternativas cercanas"):
                 with st.spinner("Buscando las mejores opciones..."):
@@ -498,7 +499,8 @@ def main(user_first_name=None, user_last_name=None):
                         for category in filtered_df['merchant_category'].unique():
                             alternatives = find_closest_alternatives(
                                 filtered_df, user_avg_lat, user_avg_lon, 
-                                category=category, max_distance=max_distance
+                                category=category, max_distance=max_distance,
+                                use_linucb=True  # Usar LinUCB para optimizar recomendaciones
                             )
                             if not alternatives.empty:
                                 all_alternatives.append(alternatives.iloc[0])
@@ -509,16 +511,20 @@ def main(user_first_name=None, user_last_name=None):
                         else:
                             results = pd.DataFrame()
                     else:
-                        # Buscar alternativas para la categoría seleccionada
+                        # Buscar alternativas para la categoría seleccionada usando LinUCB
                         results = find_closest_alternatives(
                             filtered_df, user_avg_lat, user_avg_lon, 
-                            category=selected_category, max_distance=max_distance
+                            category=selected_category, max_distance=max_distance,
+                            use_linucb=True  # Usar LinUCB para optimizar recomendaciones
                         )
                     
                     if results.empty:
                         st.info(f"No se encontraron alternativas para {selected_category} dentro de {max_distance} km.")
                     else:
                         st.success(f"¡Encontradas {len(results)} alternativas!")
+                        
+                        # Guardar los resultados en la sesión para que persistan
+                        st.session_state['recommendation_results'] = results
                         
                         # Mostrar resultados en un mapa
                         alt_map = folium.Map(location=[user_avg_lat, user_avg_lon], zoom_start=13)
@@ -531,31 +537,43 @@ def main(user_first_name=None, user_last_name=None):
                         ).add_to(alt_map)
                         
                         # Añadir marcadores para cada alternativa
-                        for _, alt in results.iterrows():
+                        for idx, alt in results.iterrows():
+                            # Determinar color según el algoritmo usado
+                            if 'ucb_score' in alt:
+                                # Usar el score de LinUCB para determinar el color
+                                # Normalizar el score entre 0 y 1 (0 es mejor para verde, 1 es peor para rojo)
+                                score_norm = 1.0 - min(1.0, max(0.0, alt['ucb_score'] / results['ucb_score'].max()))
+                            elif 'combined_score' in alt:
+                                score_norm = min(1.0, max(0.0, alt['combined_score']))
+                            else:
+                                score_norm = 0.5
+                            
+                            # Convertir a color: verde (0) a rojo (1)
+                            r = int(255 * score_norm)
+                            g = int(255 * (1 - score_norm))
+                            b = 0
+                            color = f'#{r:02x}{g:02x}{b:02x}'
+                            
+                            # Información para el popup
+                            score_info = ""
+                            if 'ucb_score' in alt:
+                                score_info = f"<b>Puntuación LinUCB:</b> {alt['ucb_score']:.2f}<br>"
+                            elif 'combined_score' in alt:
+                                score_info = f"<b>Puntuación combinada:</b> {alt['combined_score']:.2f}<br>"
+                            
                             popup = f"""
                             <b>{alt['merchant_name']}</b><br>
                             <b>Categoría:</b> {alt['merchant_category']}<br>
                             <b>Precio promedio:</b> ${alt['avg_price']:.2f}<br>
-                            <b>Distancia:</b> {alt['distance_from_user']:.2f} km
+                            <b>Distancia:</b> {alt['distance_from_user']:.2f} km<br>
+                            {score_info}
                             """
-                            
-                            # Usar un ícono de tienda con color según score (verde=mejor, rojo=peor)
-                            if 'combined_score' in alt:
-                                # Normalizar score entre 0 y 1 (0 es mejor)
-                                score_norm = min(1.0, max(0.0, alt['combined_score']))
-                                # Convertir a color: verde (0) a rojo (1)
-                                r = int(255 * score_norm)
-                                g = int(255 * (1 - score_norm))
-                                b = 0
-                                color = f'#{r:02x}{g:02x}{b:02x}'
-                            else:
-                                color = "green"
                             
                             folium.Marker(
                                 [alt['merchant_lat'], alt['merchant_lon']],
                                 popup=popup,
-                                icon=folium.Icon(color="green" if 'combined_score' not in alt else None, 
-                                                icon_color=color if 'combined_score' in alt else None,
+                                icon=folium.Icon(color="green" if score_norm < 0.3 else None, 
+                                                icon_color=color,
                                                 icon="shopping-cart", prefix="fa"),
                                 tooltip=f"{alt['merchant_name']} - ${alt['avg_price']:.2f}"
                             ).add_to(alt_map)
@@ -570,15 +588,104 @@ def main(user_first_name=None, user_last_name=None):
                             ).add_to(alt_map)
                         
                         # Mostrar el mapa
-                        st.write("Mapa de alternativas cercanas (color verde = mejor relación precio/distancia):")
+                        st.write("Mapa de alternativas cercanas (color verde = mejor según el algoritmo LinUCB):")
                         folium_static(alt_map)
                         
+                        # Mostrar tabla de resultados con opción para dar feedback
+                        st.write("Alternativas recomendadas por LinUCB:")
+                        
+                        # Preparar columnas a mostrar
+                        display_cols = ['merchant_name', 'merchant_category', 'avg_price', 'distance_from_user', 'transaction_count']
+                        
+                        # Si están disponibles las puntuaciones de LinUCB, añadirlas
+                        if 'ucb_score' in results.columns:
+                            display_cols.extend(['ucb_score', 'expected_reward', 'exploration_bonus'])
+                        elif 'combined_score' in results.columns:
+                            display_cols.append('combined_score')
+                            
+                        display_results = results[display_cols].copy()
+                        
+                        # Renombrar columnas para mayor claridad
+                        column_renames = {
+                            'merchant_name': 'Comercio', 
+                            'merchant_category': 'Categoría', 
+                            'avg_price': 'Precio promedio ($)', 
+                            'distance_from_user': 'Distancia (km)', 
+                            'transaction_count': 'Popularidad',
+                            'ucb_score': 'Puntuación LinUCB',
+                            'expected_reward': 'Recompensa esperada',
+                            'exploration_bonus': 'Bonus exploración',
+                            'combined_score': 'Puntuación combinada'
+                        }
+                        display_results.columns = [column_renames.get(col, col) for col in display_results.columns]
+                        
                         # Mostrar tabla de resultados
-                        st.write("Alternativas ordenadas por mejor relación precio/distancia:")
-                        display_results = results[['merchant_name', 'merchant_category', 'avg_price', 'distance_from_user', 'transaction_count']]
-                        display_results.columns = ['Comercio', 'Categoría', 'Precio promedio ($)', 'Distancia (km)', 'Popularidad']
                         st.dataframe(display_results)
+                        
+                        # Sección de feedback para LinUCB
+                        st.subheader("¿Te gusta esta recomendación?")
+                        st.write("Tu feedback nos ayuda a mejorar nuestras sugerencias.")
 
+            # Si hay resultados guardados en la sesión, mostrar el formulario de feedback
+            # Esto permite que el formulario persista incluso después de interactuar con el slider
+            if 'recommendation_results' in st.session_state and not st.session_state['recommendation_results'].empty:
+                results = st.session_state['recommendation_results']
+                
+                # Inicializar las variables de sesión si no existen
+                if 'selected_merchant' not in st.session_state:
+                    st.session_state['selected_merchant'] = results['merchant_name'].iloc[0]
+                
+                if 'feedback_score' not in st.session_state:
+                    st.session_state['feedback_score'] = 0.5
+                    
+                # Seleccionar un comercio para dar feedback
+                selected_merchant = st.selectbox(
+                    "Selecciona un comercio para valorar:",
+                    options=results['merchant_name'].tolist(),
+                    key='merchant_selection',
+                    index=list(results['merchant_name']).index(st.session_state['selected_merchant'])
+                )
+                st.session_state['selected_merchant'] = selected_merchant
+                
+                # Dar una valoración
+                feedback_score = st.slider(
+                    "¿Qué tan útil te pareció esta recomendación?",
+                    min_value=0.0,
+                    max_value=1.0,
+                    value=st.session_state['feedback_score'],
+                    step=0.1,
+                    key='feedback_slider',
+                    help="0 = Nada útil, 1 = Muy útil"
+                )
+                st.session_state['feedback_score'] = feedback_score
+                
+                # Botón para enviar feedback
+                if st.button("Enviar valoración", key='submit_feedback'):
+                    # Obtener datos del comercio seleccionado
+                    merchant_data = results[results['merchant_name'] == selected_merchant].iloc[0].to_dict()
+                    
+                    # Obtener ubicación del usuario
+                    user_avg_lat = filtered_df['latitude'].mean()
+                    user_avg_lon = filtered_df['longitude'].mean()
+                    
+                    # Registrar el feedback
+                    success = record_merchant_feedback(
+                        selected_merchant,
+                        user_avg_lat,
+                        user_avg_lon,
+                        feedback_score,
+                        merchant_data
+                    )
+                    
+                    if success:
+                        st.success(f"¡Gracias por tu feedback sobre {selected_merchant}!")
+                        st.info("Tus valoraciones ayudan a mejorar nuestras recomendaciones futuras.")
+                        
+                        # Opcional: limpiar los valores para permitir un nuevo feedback
+                        st.session_state['feedback_score'] = 0.5
+                    else:
+                        st.error("No se pudo procesar el feedback. Por favor intenta nuevamente.")
+                        
         # Buscar alternativas tradicionales (solo precio)
         st.subheader("Alternativas de ahorro tradicionales")
         recommendations = find_alternative_merchants(filtered_df)

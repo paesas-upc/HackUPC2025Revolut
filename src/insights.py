@@ -3,6 +3,11 @@ import numpy as np
 from geopy.distance import geodesic
 from sklearn.neighbors import BallTree
 import numpy as np
+import os
+from datetime import datetime
+
+# Import the LinUCB algorithm
+from linucb import LinUCBAlgorithm, extract_features_from_merchant
 
 def calculate_distance(coords1, coords2):
     """
@@ -199,10 +204,10 @@ def find_alternative_merchants(df):
     
     return recommendations
 
-def find_closest_alternatives(df, user_lat, user_lon, category=None, max_distance=5.0):
+def find_closest_alternatives(df, user_lat, user_lon, category=None, max_distance=5.0, use_linucb=True):
     """
     Encuentra los comercios más cercanos al usuario, opcionalmente filtrado por categoría,
-    y los ordena considerando tanto distancia como precio
+    y los ordena considerando tanto distancia como precio usando LinUCB si está disponible
     
     Args:
         df: DataFrame con datos de transacciones
@@ -210,9 +215,10 @@ def find_closest_alternatives(df, user_lat, user_lon, category=None, max_distanc
         user_lon: Longitud del usuario
         category: Categoría opcional para filtrar (default: None)
         max_distance: Distancia máxima en km a considerar
+        use_linucb: Si es True, usa LinUCB para optimizar recomendaciones
         
     Returns:
-        DataFrame con comercios cercanos ordenados por un score combinado de precio y distancia
+        DataFrame con comercios cercanos ordenados por puntaje recomendación
     """
     # Verificar que tenemos datos suficientes
     if df.empty:
@@ -247,19 +253,115 @@ def find_closest_alternatives(df, user_lat, user_lon, category=None, max_distanc
     if nearby.empty:
         return pd.DataFrame()
     
-    # Normalizar precio y distancia para combinarlos en un score
-    if len(nearby) > 1:  # Solo normalizar si hay más de un comercio
-        nearby['price_norm'] = (nearby['avg_price'] - nearby['avg_price'].min()) / (nearby['avg_price'].max() - nearby['avg_price'].min())
-        nearby['distance_norm'] = (nearby['distance_from_user'] - nearby['distance_from_user'].min()) / (nearby['distance_from_user'].max() - nearby['distance_from_user'].min())
-        # Score combinado (60% precio, 40% distancia)
-        nearby['combined_score'] = 0.6 * nearby['price_norm'] + 0.4 * nearby['distance_norm']
-    else:
-        # Si solo hay un comercio, asignar score 0
-        nearby['price_norm'] = 0
-        nearby['distance_norm'] = 0
-        nearby['combined_score'] = 0
+    # Si no se usa LinUCB, volver al método original
+    if not use_linucb:
+        # Normalizar precio y distancia para combinarlos en un score
+        if len(nearby) > 1:  # Solo normalizar si hay más de un comercio
+            nearby['price_norm'] = (nearby['avg_price'] - nearby['avg_price'].min()) / (nearby['avg_price'].max() - nearby['avg_price'].min() + 1e-10)
+            nearby['distance_norm'] = (nearby['distance_from_user'] - nearby['distance_from_user'].min()) / (nearby['distance_from_user'].max() - nearby['distance_from_user'].min() + 1e-10)
+            # Score combinado (60% precio, 40% distancia)
+            nearby['combined_score'] = 0.6 * nearby['price_norm'] + 0.4 * nearby['distance_norm']
+        else:
+            # Si solo hay un comercio, asignar score 0
+            nearby['price_norm'] = 0
+            nearby['distance_norm'] = 0
+            nearby['combined_score'] = 0
+        
+        # Ordenar por score combinado (menor es mejor)
+        result = nearby.sort_values('combined_score')
+        
+        return result
     
-    # Ordenar por score combinado (menor es mejor)
-    result = nearby.sort_values('combined_score')
+    # Usar LinUCB para recomendaciones
+    try:
+        # Cargar o crear un modelo LinUCB
+        linucb_model = LinUCBAlgorithm.load_model()
+        
+        # Preparar los datos para LinUCB
+        # 1. Extraer características de cada comerciante
+        context_features = {}
+        merchants_dict = {}
+        
+        for idx, merchant in nearby.iterrows():
+            merchant_id = merchant['merchant_name']
+            
+            # Añadir el arm al modelo si es nuevo
+            linucb_model.add_arm(merchant_id)
+            
+            # Extraer features
+            features = extract_features_from_merchant(merchant, user_lat, user_lon)
+            context_features[merchant_id] = features
+            merchants_dict[merchant_id] = merchant
+        
+        # 2. Seleccionar comerciantes con LinUCB
+        selected_arm, all_scores = linucb_model.select_arm(context_features)
+        
+        # 3. Agregar puntuación UCB a los resultados
+        for merchant_id, scores in all_scores.items():
+            merchant_idx = nearby.index[nearby['merchant_name'] == merchant_id].tolist()
+            if merchant_idx:
+                nearby.at[merchant_idx[0], 'ucb_score'] = scores[0]
+                nearby.at[merchant_idx[0], 'expected_reward'] = scores[1]
+                nearby.at[merchant_idx[0], 'exploration_bonus'] = scores[2]
+        
+        # Ordenar por puntaje UCB (mayor es mejor)
+        nearby['linucb_rank'] = nearby['ucb_score'].rank(ascending=False)
+        result = nearby.sort_values('linucb_rank')
+        
+        # Guardar el modelo para futura referencia
+        linucb_model.save_model()
+        
+        return result
     
-    return result
+    except Exception as e:
+        print(f"Error using LinUCB: {str(e)}. Falling back to standard method.")
+        
+        # Si hay algún error, volver al método original
+        if len(nearby) > 1:
+            nearby['price_norm'] = (nearby['avg_price'] - nearby['avg_price'].min()) / (nearby['avg_price'].max() - nearby['avg_price'].min() + 1e-10)
+            nearby['distance_norm'] = (nearby['distance_from_user'] - nearby['distance_from_user'].min()) / (nearby['distance_from_user'].max() - nearby['distance_from_user'].min() + 1e-10)
+            nearby['combined_score'] = 0.6 * nearby['price_norm'] + 0.4 * nearby['distance_norm']
+        else:
+            nearby['price_norm'] = 0
+            nearby['distance_norm'] = 0
+            nearby['combined_score'] = 0
+            
+        result = nearby.sort_values('combined_score')
+        return result
+
+def record_merchant_feedback(merchant_id, user_lat, user_lon, feedback_score, merchant_data=None):
+    """
+    Registra feedback del usuario para un comercio y actualiza el modelo LinUCB
+    
+    Args:
+        merchant_id: ID del comercio seleccionado
+        user_lat: Latitud del usuario
+        user_lon: Longitud del usuario
+        feedback_score: Puntuación de 0 a 1 (donde 1 es lo mejor)
+        merchant_data: Datos del comercio para extraer características
+    
+    Returns:
+        Success flag
+    """
+    try:
+        # Cargar modelo LinUCB
+        linucb_model = LinUCBAlgorithm.load_model()
+        
+        if merchant_data:
+            # Extraer características del comercio
+            features = extract_features_from_merchant(merchant_data, user_lat, user_lon)
+            
+            # Actualizar el modelo con el feedback
+            linucb_model.update(merchant_id, features, feedback_score)
+            
+            # Guardar el modelo actualizado
+            linucb_model.save_model()
+            
+            return True
+        else:
+            print("No merchant data provided for feedback")
+            return False
+    
+    except Exception as e:
+        print(f"Error recording feedback: {str(e)}")
+        return False
