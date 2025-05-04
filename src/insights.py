@@ -11,8 +11,8 @@ from linucb import LinUCBAlgorithm, extract_features_from_merchant
 
 def calculate_distance(coords1, coords2):
     """
-    Calcula la distancia en kilómetros entre dos pares de coordenadas
-    usando la fórmula de Haversine (geodesic)
+    Calculates the distance in kilometers between two coordinate pairs
+    using the Haversine formula (geodesic)
     """
     try:
         distance = geodesic(coords1, coords2).kilometers
@@ -21,21 +21,21 @@ def calculate_distance(coords1, coords2):
         return None
 
 def identify_spending_patterns(df):
-    # Patrones por categoría y hora del día
+    # Patterns by category and time of day
     time_patterns = df.groupby(['merchant_category', 'time_of_day']).agg(
         avg_transaction=('amount', 'mean'),
         transaction_count=('amount', 'count'),
         avg_distance=('distance_to_merchant', 'mean')
     ).reset_index()
     
-    # Patrones por categoría y día de la semana
+    # Patterns by category and day of the week
     week_patterns = df.groupby(['merchant_category', 'day_of_week']).agg(
         avg_transaction=('amount', 'mean'),
         transaction_count=('amount', 'count'),
         avg_distance=('distance_to_merchant', 'mean')
     ).reset_index()
     
-    # Identificar categorías con mayor variación de precios
+    # Identify categories with higher price variation
     price_variation = df.groupby(['merchant_category', 'merchant_name']).agg(
         avg_price=('amount', 'mean')
     ).reset_index()
@@ -55,38 +55,38 @@ def identify_spending_patterns(df):
 
 def generate_user_insights(df):
     """
-    Genera insights personalizados para el usuario basados en sus datos
+    Generates personalized insights for the user based on their data
     """
     insights = []
     
-    # Verificar que hay suficientes datos
+    # Verify there's enough data
     if len(df) < 5:
-        insights.append("No tenemos suficientes datos para generar insights personalizados. ¡Continúa utilizando la app para obtener recomendaciones más precisas!")
+        insights.append("We don't have enough data to generate personalized insights. Keep using the app to get more accurate recommendations!")
         return insights
     
-    # Insight sobre distancias
+    # Insight about distances
     if 'distance_to_merchant' in df.columns:
         avg_distance = df['distance_to_merchant'].mean()
         if not pd.isna(avg_distance):
-            insights.append(f"En promedio, te desplazas {avg_distance:.1f} km para realizar tus compras.")
+            insights.append(f"On average, you travel {avg_distance:.1f} km to make your purchases.")
             
-            # Categorías con mayor distancia
+            # Categories with greater distance
             cat_dist = df.groupby('merchant_category')['distance_to_merchant'].mean().sort_values(ascending=False)
             if not cat_dist.empty:
                 furthest_cat = cat_dist.index[0]
                 furthest_dist = cat_dist.iloc[0]
                 if not pd.isna(furthest_dist) and furthest_dist > 0:
-                    insights.append(f"Te desplazas más lejos para '{furthest_cat}', con un promedio de {furthest_dist:.1f} km.")
+                    insights.append(f"You travel further for '{furthest_cat}', with an average of {furthest_dist:.1f} km.")
     
-    # Insight sobre categorías más frecuentes
+    # Insight about most frequent categories
     if len(df) >= 10:
         top_categories = df['merchant_category'].value_counts().head(3)
         if not top_categories.empty:
             top_cat = top_categories.index[0]
             top_count = top_categories.iloc[0]
-            insights.append(f"Tu categoría de gasto más frecuente es '{top_cat}' con {top_count} transacciones.")
+            insights.append(f"Your most frequent spending category is '{top_cat}' with {top_count} transactions.")
     
-    # Insight sobre zonas si hay clusters
+    # Insight about zones if there are clusters
     if 'cluster' in df.columns:
         valid_clusters = df[df['cluster'] != -1]
         if not valid_clusters.empty:
@@ -99,38 +99,38 @@ def generate_user_insights(df):
                 
                 diff_percentage = ((exp_zone_avg - cheap_zone_avg) / cheap_zone_avg) * 100
                 
-                insights.append(f"Gastas en promedio un {diff_percentage:.1f}% más en la zona {expensive_zone} comparado con la zona {cheapest_zone}.")
+                insights.append(f"You spend on average {diff_percentage:.1f}% more in zone {expensive_zone} compared to zone {cheapest_zone}.")
     
-    # Insight sobre días más caros
+    # Insight about most expensive days
     if 'day_of_week' in df.columns:
         day_spending = df.groupby('day_of_week')['amount'].mean()
         expensive_day = day_spending.idxmax()
         cheapest_day = day_spending.idxmin()
         
-        days = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"]
+        days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
         
         diff_day_percentage = ((day_spending.max() - day_spending.min()) / day_spending.min()) * 100
         
-        if diff_day_percentage > 20:  # Solo si la diferencia es significativa
-            insights.append(f"Tus gastos son en promedio un {diff_day_percentage:.1f}% más altos el {days[expensive_day]} comparado con el {days[cheapest_day]}.")
+        if diff_day_percentage > 20:  # Only if the difference is significant
+            insights.append(f"Your expenses are on average {diff_day_percentage:.1f}% higher on {days[expensive_day]} compared to {days[cheapest_day]}.")
     
-    # Insight sobre momento del día
+    # Insight about time of day
     if 'time_of_day' in df.columns:
         time_spending = df.groupby('time_of_day')['amount'].mean()
         expensive_time = time_spending.idxmax()
         
-        insights.append(f"Tiendes a gastar más durante la {expensive_time}.")
+        insights.append(f"You tend to spend more during the {expensive_time}.")
     
     return insights
 
 def find_alternative_merchants(df):
     """
-    Encuentra comercios alternativos que podrían ofrecer mejores precios
+    Finds alternative merchants that might offer better prices
     """
     if len(df) < 10:
         return []
     
-    # Asegurarse de que tenemos las columnas necesarias
+    # Make sure we have the necessary columns
     required_cols = ['merchant_name', 'merchant_category', 'amount', 
                      'merchant_latitude', 'merchant_longitude',
                      'latitude', 'longitude']
@@ -138,15 +138,15 @@ def find_alternative_merchants(df):
     if not all(col in df.columns for col in required_cols):
         return []
     
-    # Encontrar comercios frecuentes (al menos 2 visitas)
+    # Find frequent merchants (at least 2 visits)
     merchant_counts = df['merchant_name'].value_counts()
     frequent_merchants = merchant_counts[merchant_counts >= 2].index.tolist()
     
-    # Si no hay suficientes comercios frecuentes, no podemos hacer recomendaciones
+    # If there aren't enough frequent merchants, we can't make recommendations
     if len(frequent_merchants) < 2:
         return []
     
-    # Agrupar datos por comerciante para obtener precio promedio y ubicación
+    # Group data by merchant to get average price and location
     merchants = df.groupby(['merchant_name', 'merchant_category']).agg(
         avg_amount=('amount', 'mean'),
         visit_count=('amount', 'count'),
@@ -154,14 +154,14 @@ def find_alternative_merchants(df):
         avg_lon=('merchant_longitude', 'mean')
     ).reset_index()
     
-    # Filtrar para obtener solo comercios frecuentes
+    # Filter to get only frequent merchants
     frequent_merchants_data = merchants[merchants['merchant_name'].isin(frequent_merchants)]
     
     recommendations = []
     
-    # Por cada comercio frecuente, buscar alternativas más baratas en la misma categoría
+    # For each frequent merchant, look for cheaper alternatives in the same category
     for _, merchant in frequent_merchants_data.iterrows():
-        # Buscamos alternativas en la misma categoría
+        # Look for alternatives in the same category
         same_category = merchants[
             (merchants['merchant_category'] == merchant['merchant_category']) &
             (merchants['merchant_name'] != merchant['merchant_name']) &
@@ -169,7 +169,7 @@ def find_alternative_merchants(df):
         ]
         
         if not same_category.empty:
-            # Calculamos distancias desde el comercio original a las alternativas
+            # Calculate distances from the original merchant to the alternatives
             same_category['distance'] = same_category.apply(
                 lambda row: calculate_distance(
                     (merchant['avg_lat'], merchant['avg_lon']),
@@ -178,14 +178,14 @@ def find_alternative_merchants(df):
                 axis=1
             )
             
-            # Filtrar por distancia máxima (2 km) y ordenar por precio
+            # Filter by maximum distance (2 km) and sort by price
             nearby_alternatives = same_category[same_category['distance'] <= 2].sort_values('avg_amount')
             
             if not nearby_alternatives.empty:
                 best_alternative = nearby_alternatives.iloc[0]
                 savings_percent = ((merchant['avg_amount'] - best_alternative['avg_amount']) / merchant['avg_amount']) * 100
                 
-                # Solo recomendar si el ahorro es significativo (>10%)
+                # Only recommend if the savings are significant (>10%)
                 if savings_percent > 10:
                     recommendations.append({
                         'original_merchant': merchant['merchant_name'],
@@ -199,38 +199,38 @@ def find_alternative_merchants(df):
                         'alternative_coords': (best_alternative['avg_lat'], best_alternative['avg_lon'])
                     })
     
-    # Ordenar por porcentaje de ahorro
+    # Sort by savings percentage
     recommendations.sort(key=lambda x: x['savings_percent'], reverse=True)
     
     return recommendations
 
 def find_closest_alternatives(df, user_lat, user_lon, category=None, max_distance=5.0, use_linucb=True):
     """
-    Encuentra los comercios más cercanos al usuario, opcionalmente filtrado por categoría,
-    y los ordena considerando tanto distancia como precio usando LinUCB si está disponible
+    Finds the closest merchants to the user, optionally filtered by category,
+    and orders them considering both distance and price using LinUCB if available
     
     Args:
-        df: DataFrame con datos de transacciones
-        user_lat: Latitud del usuario
-        user_lon: Longitud del usuario
-        category: Categoría opcional para filtrar (default: None)
-        max_distance: Distancia máxima en km a considerar
-        use_linucb: Si es True, usa LinUCB para optimizar recomendaciones
+        df: DataFrame with transaction data
+        user_lat: User's latitude
+        user_lon: User's longitude
+        category: Optional category to filter (default: None)
+        max_distance: Maximum distance in km to consider
+        use_linucb: If True, uses LinUCB to optimize recommendations
         
     Returns:
-        DataFrame con comercios cercanos ordenados por puntaje recomendación
+        DataFrame with nearby merchants ordered by recommendation score
     """
-    # Verificar que tenemos datos suficientes
+    # Verify we have enough data
     if df.empty:
         return pd.DataFrame()
         
-    # Filtrar por categoría si se especifica
+    # Filter by category if specified
     category_df = df if category is None else df[df['merchant_category'] == category]
     
     if category_df.empty:
         return pd.DataFrame()
     
-    # Agrupar por comercio para obtener precio promedio y ubicación
+    # Group by merchant to get average price and location
     merchants = category_df.groupby(['merchant_name', 'merchant_category']).agg(
         avg_price=('amount', 'mean'),
         transaction_count=('amount', 'count'),
@@ -238,7 +238,7 @@ def find_closest_alternatives(df, user_lat, user_lon, category=None, max_distanc
         merchant_lon=('merchant_longitude', 'mean')
     ).reset_index()
     
-    # Calcular distancia desde la ubicación del usuario
+    # Calculate distance from the user's location
     merchants['distance_from_user'] = merchants.apply(
         lambda row: calculate_distance(
             (user_lat, user_lon),
@@ -247,56 +247,56 @@ def find_closest_alternatives(df, user_lat, user_lon, category=None, max_distanc
         axis=1
     )
     
-    # Filtrar por distancia máxima
+    # Filter by maximum distance
     nearby = merchants[merchants['distance_from_user'] <= max_distance]
     
     if nearby.empty:
         return pd.DataFrame()
     
-    # Si no se usa LinUCB, volver al método original
+    # If LinUCB is not used, go back to the original method
     if not use_linucb:
-        # Normalizar precio y distancia para combinarlos en un score
-        if len(nearby) > 1:  # Solo normalizar si hay más de un comercio
+        # Normalize price and distance to combine them into a score
+        if len(nearby) > 1:  # Only normalize if there's more than one merchant
             nearby['price_norm'] = (nearby['avg_price'] - nearby['avg_price'].min()) / (nearby['avg_price'].max() - nearby['avg_price'].min() + 1e-10)
             nearby['distance_norm'] = (nearby['distance_from_user'] - nearby['distance_from_user'].min()) / (nearby['distance_from_user'].max() - nearby['distance_from_user'].min() + 1e-10)
-            # Score combinado (60% precio, 40% distancia)
+            # Combined score (60% price, 40% distance)
             nearby['combined_score'] = 0.6 * nearby['price_norm'] + 0.4 * nearby['distance_norm']
         else:
-            # Si solo hay un comercio, asignar score 0
+            # If there's only one merchant, assign score 0
             nearby['price_norm'] = 0
             nearby['distance_norm'] = 0
             nearby['combined_score'] = 0
         
-        # Ordenar por score combinado (menor es mejor)
+        # Sort by combined score (lower is better)
         result = nearby.sort_values('combined_score')
         
         return result
     
-    # Usar LinUCB para recomendaciones
+    # Use LinUCB for recommendations
     try:
-        # Cargar o crear un modelo LinUCB
+        # Load or create a LinUCB model
         linucb_model = LinUCBAlgorithm.load_model()
         
-        # Preparar los datos para LinUCB
-        # 1. Extraer características de cada comerciante
+        # Prepare the data for LinUCB
+        # 1. Extract features from each merchant
         context_features = {}
         merchants_dict = {}
         
         for idx, merchant in nearby.iterrows():
             merchant_id = merchant['merchant_name']
             
-            # Añadir el arm al modelo si es nuevo
+            # Add the arm to the model if it's new
             linucb_model.add_arm(merchant_id)
             
-            # Extraer features
+            # Extract features
             features = extract_features_from_merchant(merchant, user_lat, user_lon)
             context_features[merchant_id] = features
             merchants_dict[merchant_id] = merchant
         
-        # 2. Seleccionar comerciantes con LinUCB
+        # 2. Select merchants with LinUCB
         selected_arm, all_scores = linucb_model.select_arm(context_features)
         
-        # 3. Agregar puntuación UCB a los resultados
+        # 3. Add UCB score to the results
         for merchant_id, scores in all_scores.items():
             merchant_idx = nearby.index[nearby['merchant_name'] == merchant_id].tolist()
             if merchant_idx:
@@ -304,11 +304,11 @@ def find_closest_alternatives(df, user_lat, user_lon, category=None, max_distanc
                 nearby.at[merchant_idx[0], 'expected_reward'] = scores[1]
                 nearby.at[merchant_idx[0], 'exploration_bonus'] = scores[2]
         
-        # Ordenar por puntaje UCB (mayor es mejor)
+        # Sort by UCB score (higher is better)
         nearby['linucb_rank'] = nearby['ucb_score'].rank(ascending=False)
         result = nearby.sort_values('linucb_rank')
         
-        # Guardar el modelo para futura referencia
+        # Save the model for future reference
         linucb_model.save_model()
         
         return result
@@ -316,7 +316,7 @@ def find_closest_alternatives(df, user_lat, user_lon, category=None, max_distanc
     except Exception as e:
         print(f"Error using LinUCB: {str(e)}. Falling back to standard method.")
         
-        # Si hay algún error, volver al método original
+        # If there's an error, go back to the original method
         if len(nearby) > 1:
             nearby['price_norm'] = (nearby['avg_price'] - nearby['avg_price'].min()) / (nearby['avg_price'].max() - nearby['avg_price'].min() + 1e-10)
             nearby['distance_norm'] = (nearby['distance_from_user'] - nearby['distance_from_user'].min()) / (nearby['distance_from_user'].max() - nearby['distance_from_user'].min() + 1e-10)
@@ -331,30 +331,30 @@ def find_closest_alternatives(df, user_lat, user_lon, category=None, max_distanc
 
 def record_merchant_feedback(merchant_id, user_lat, user_lon, feedback_score, merchant_data=None):
     """
-    Registra feedback del usuario para un comercio y actualiza el modelo LinUCB
+    Records user feedback for a merchant and updates the LinUCB model
     
     Args:
-        merchant_id: ID del comercio seleccionado
-        user_lat: Latitud del usuario
-        user_lon: Longitud del usuario
-        feedback_score: Puntuación de 0 a 1 (donde 1 es lo mejor)
-        merchant_data: Datos del comercio para extraer características
+        merchant_id: Merchant ID selected
+        user_lat: User's latitude
+        user_lon: User's longitude
+        feedback_score: Score from 0 to 1 (where 1 is the best)
+        merchant_data: Merchant data to extract features
     
     Returns:
         Success flag
     """
     try:
-        # Cargar modelo LinUCB
+        # Load LinUCB model
         linucb_model = LinUCBAlgorithm.load_model()
         
         if merchant_data:
-            # Extraer características del comercio
+            # Extract merchant features
             features = extract_features_from_merchant(merchant_data, user_lat, user_lon)
             
-            # Actualizar el modelo con el feedback
+            # Update the model with the feedback
             linucb_model.update(merchant_id, features, feedback_score)
             
-            # Guardar el modelo actualizado
+            # Save the updated model
             linucb_model.save_model()
             
             return True
