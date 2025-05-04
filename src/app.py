@@ -200,7 +200,7 @@ def main(user_first_name=None, user_last_name=None):
             folium.LayerControl().add_to(m)
             
             # Mostrar el mapa
-            st.write("El mapa muestra la ubicación única del usuario (azul) y los comercios donde realizó transacciones (rojo). Las líneas conectan al usuario con cada comercio.")
+            st.write("El mapa muestra la ubicación única del usuario (azul) y los comercios donde realizó transacciones (rojo).")
             folium_static(m)
         
         with stats_tab:
@@ -368,7 +368,7 @@ def main(user_first_name=None, user_last_name=None):
             
             # Mostrar el mapa
             st.write("Zonas identificadas mediante agrupamiento geográfico:")
-            st.write("Las zonas donde tienes actividad están resaltadas con mayor opacidad. Los puntos azules representan tus ubicaciones.")
+            st.write("El punto azul representa tu ubicación.")
             folium_static(cluster_map)
             
             # Análisis comparativo entre zonas
