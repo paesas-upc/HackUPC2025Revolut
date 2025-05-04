@@ -9,22 +9,22 @@ from geopy.distance import great_circle
 
 def cluster_locations(df, min_cluster_size=5, method='hdbscan'):
     """
-    Agrupa ubicaciones en clusters geográficos.
+    Groups locations into geographic clusters.
     
     Args:
-        df: DataFrame con columnas latitude y longitude
-        min_cluster_size: Tamaño mínimo de cluster para HDBSCAN
-        method: 'hdbscan' o 'dbscan'
+        df: DataFrame with latitude and longitude columns
+        min_cluster_size: Minimum cluster size for HDBSCAN
+        method: 'hdbscan' or 'dbscan'
     
     Returns:
-        DataFrame con columna cluster añadida
+        DataFrame with cluster column added
     """
-    # Obtener coordenadas únicas
+    # Get unique coordinates
     coords = df[['latitude', 'longitude']].drop_duplicates().values
     
-    # Verificar si hay suficientes puntos para hacer clustering
+    # Check if there are enough points to perform clustering
     if len(coords) < min_cluster_size:
-        # Si no hay suficientes puntos, asignar todos al mismo cluster (0)
+        # If there aren't enough points, assign all to the same cluster (0)
         df['cluster'] = 0
         return df
     
@@ -36,26 +36,26 @@ def cluster_locations(df, min_cluster_size=5, method='hdbscan'):
         )
         cluster_labels = clusterer.fit_predict(coords)
         
-        # Crear un mapeo de (lat, lon) a etiqueta de cluster
+        # Create a mapping of (lat, lon) to cluster label
         location_to_cluster = {
             (coords[i][0], coords[i][1]): label 
             for i, label in enumerate(cluster_labels)
         }
         
-        # Aplicar el mapeo al DataFrame original
+        # Apply the mapping to the original DataFrame
         df['cluster'] = df.apply(
             lambda row: location_to_cluster.get((row['latitude'], row['longitude']), -1), 
             axis=1
         )
     
     elif method == 'dbscan':
-        # Convertir lat/lon a radianes para DBSCAN con métrica haversine
+        # Convert lat/lon to radians for DBSCAN with haversine metric
         coords_rad = np.radians(coords)
         
-        # Epsilon en radianes (~500 metros)
+        # Epsilon in radians (~500 meters)
         epsilon = 500 / 6371000
         
-        # Ejecutar DBSCAN
+        # Execute DBSCAN
         db = DBSCAN(
             eps=epsilon, 
             min_samples=min_cluster_size, 
@@ -63,13 +63,13 @@ def cluster_locations(df, min_cluster_size=5, method='hdbscan'):
             metric='haversine'
         ).fit(coords_rad)
         
-        # Crear mapeo
+        # Create mapping
         location_to_cluster = {
             (coords[i][0], coords[i][1]): label 
             for i, label in enumerate(db.labels_)
         }
         
-        # Aplicar el mapeo al DataFrame original
+        # Apply the mapping to the original DataFrame
         df['cluster'] = df.apply(
             lambda row: location_to_cluster.get((row['latitude'], row['longitude']), -1), 
             axis=1
@@ -79,19 +79,19 @@ def cluster_locations(df, min_cluster_size=5, method='hdbscan'):
 
 def analyze_clusters(df):
     """
-    Analiza los clusters para obtener estadísticas relevantes
+    Analyzes the clusters to obtain relevant statistics
     """
     if 'cluster' not in df.columns:
-        raise ValueError("El DataFrame debe tener una columna 'cluster'. Ejecuta cluster_locations primero.")
+        raise ValueError("The DataFrame must have a 'cluster' column. Run cluster_locations first.")
     
-    # Si todos los puntos tienen el mismo cluster o no hay suficientes datos
+    # If all points have the same cluster or there isn't enough data
     if df['cluster'].nunique() <= 1 or len(df) < 3:
-        # Verificar que hay datos antes de calcular estadísticas
+        # Verify there's data before calculating statistics
         if len(df) > 0:
             try:
                 dominant_category = df['merchant_category'].value_counts().index[0]
             except (IndexError, KeyError):
-                dominant_category = 'Desconocido'
+                dominant_category = 'Unknown'
                 
             stats = pd.DataFrame({
                 'cluster': [0],
@@ -105,7 +105,7 @@ def analyze_clusters(df):
                 'avg_hour': [df['hour'].mean() if 'hour' in df.columns else 12]
             })
         else:
-            # Si no hay datos, crear un DataFrame con valores por defecto
+            # If there's no data, create a DataFrame with default values
             stats = pd.DataFrame({
                 'cluster': [0],
                 'avg_spent': [0],
@@ -113,7 +113,7 @@ def analyze_clusters(df):
                 'transaction_count': [0],
                 'avg_lat': [0],
                 'avg_lon': [0],
-                'dominant_category': ['Desconocido'],
+                'dominant_category': ['Unknown'],
                 'category_diversity': [0],
                 'avg_hour': [12]
             })
@@ -121,11 +121,11 @@ def analyze_clusters(df):
         stats['center_coords'] = list(zip(stats['avg_lat'], stats['avg_lon']))
         return stats
     
-    # Para casos con múltiples clusters, proceder con el análisis normal
-    # Filtrar puntos sin cluster (-1)
+    # For cases with multiple clusters, proceed with normal analysis
+    # Filter points without a cluster (-1)
     df_clustered = df[df['cluster'] != -1]
     
-    # Si después de filtrar no quedan datos, crear un dataframe vacío con la estructura correcta
+    # If after filtering there's no data left, create an empty dataframe with the correct structure
     if df_clustered.empty:
         stats = pd.DataFrame({
                 'cluster': [0],
@@ -134,14 +134,14 @@ def analyze_clusters(df):
                 'transaction_count': [0],
                 'avg_lat': [0],
                 'avg_lon': [0],
-                'dominant_category': ['Desconocido'],
+                'dominant_category': ['Unknown'],
                 'category_diversity': [0],
                 'avg_hour': [12]
             })
         stats['center_coords'] = list(zip(stats['avg_lat'], stats['avg_lon']))
         return stats
     
-    # Análisis por cluster
+    # Analysis by cluster
     try:
         cluster_stats = df_clustered.groupby('cluster').agg(
             avg_spent=('amount', 'mean'),
@@ -149,19 +149,19 @@ def analyze_clusters(df):
             transaction_count=('amount', 'count'),
             avg_lat=('latitude', 'mean'),
             avg_lon=('longitude', 'mean'),
-            dominant_category=('merchant_category', lambda x: x.value_counts().index[0] if len(x) > 0 else 'Desconocido'),
+            dominant_category=('merchant_category', lambda x: x.value_counts().index[0] if len(x) > 0 else 'Unknown'),
             category_diversity=('merchant_category', lambda x: len(x.unique())),
             avg_hour=('hour', 'mean' if 'hour' in df.columns else lambda x: 12)
         ).reset_index()
         
-        # Calcular centro geográfico de cada cluster
+        # Calculate geographic center of each cluster
         cluster_stats['center_coords'] = list(zip(cluster_stats['avg_lat'], cluster_stats['avg_lon']))
         
         return cluster_stats
     
     except Exception as e:
-        # En caso de error, devolver un DataFrame básico
-        print(f"Error en analyze_clusters: {str(e)}")
+        # In case of error, return a basic DataFrame
+        print(f"Error in analyze_clusters: {str(e)}")
         stats = pd.DataFrame({
             'cluster': [0],
             'avg_spent': [df['amount'].mean() if 'amount' in df.columns else 0],
@@ -169,7 +169,7 @@ def analyze_clusters(df):
             'transaction_count': [len(df)],
             'avg_lat': [df['latitude'].mean() if 'latitude' in df.columns else 0],
             'avg_lon': [df['longitude'].mean() if 'longitude' in df.columns else 0],
-            'dominant_category': ['Desconocido'],
+            'dominant_category': ['Unknown'],
             'category_diversity': [0],
             'avg_hour': [12]
         })

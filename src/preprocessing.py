@@ -6,7 +6,7 @@ from geopy.distance import geodesic
 def load_and_clean_data(file_path="data/transactions.csv"):
     df = pd.read_csv(file_path)
 
-    # Renombrar columnas para que coincidan con el estándar de la app
+    # Rename columns to match the app's standard
     rename_map = {
         "amt": "amount",
         "trans_date_trans_time": "timestamp",
@@ -16,17 +16,17 @@ def load_and_clean_data(file_path="data/transactions.csv"):
         "merch_long": "merchant_longitude",
         "category": "merchant_category",
         "merchant": "merchant_name",
-        "cc_num": "user_id",  # Asumimos que cc_num puede servir como identificador de usuario
+        "cc_num": "user_id",  # We assume cc_num can serve as user identifier
         "first": "first",
         "last": "last"
     }
     df = df.rename(columns={k: v for k, v in rename_map.items() if k in df.columns})
 
-    # Eliminar columna innecesaria si existe
+    # Remove unnecessary column if it exists
     if "Unnamed: 0" in df.columns:
         df = df.drop(columns=["Unnamed: 0"])
 
-    # Convertir columna de fecha
+    # Convert date column
     df["timestamp"] = pd.to_datetime(df["timestamp"], dayfirst=True)
     df["date"] = df["timestamp"].dt.date
     df["hour"] = df["timestamp"].dt.hour
@@ -34,21 +34,21 @@ def load_and_clean_data(file_path="data/transactions.csv"):
     df["year"] = df["timestamp"].dt.year
     df["day_of_week"] = df["timestamp"].dt.dayofweek
 
-    # Aseguramos que amount sea numérico
+    # Ensure amount is numeric
     df["amount"] = pd.to_numeric(df["amount"], errors="coerce")
     
-    # Filtrar registros con valores no válidos
+    # Filter records with invalid values
     df = df.dropna(subset=["latitude", "longitude", "amount"])
     
-    # Añadir columna para tiempo (mañana, tarde, noche)
+    # Add column for time of day (morning, afternoon, night)
     df["time_of_day"] = pd.cut(
         df["hour"], 
         bins=[0, 6, 12, 18, 24], 
-        labels=["noche", "mañana", "tarde", "noche"],
+        labels=["night", "morning", "afternoon", "night"],
         ordered=False
     )
     
-    # Calcular distancia entre usuario y comercio
+    # Calculate distance between user and merchant
     df["distance_to_merchant"] = df.apply(
         lambda row: calculate_distance(
             (row["latitude"], row["longitude"]),
@@ -61,8 +61,8 @@ def load_and_clean_data(file_path="data/transactions.csv"):
 
 def calculate_distance(user_coords, merchant_coords):
     """
-    Calcula la distancia en kilómetros entre coordenadas de usuario y comerciante
-    usando la fórmula de Haversine (geodesic)
+    Calculates the distance in kilometers between user and merchant coordinates
+    using the Haversine formula (geodesic)
     """
     try:
         distance = geodesic(user_coords, merchant_coords).kilometers
@@ -72,8 +72,8 @@ def calculate_distance(user_coords, merchant_coords):
 
 def aggregate_by_location(df, lat_col='latitude', lon_col='longitude', include_merchant=False):
     """
-    Agrega transacciones por ubicación y categoría.
-    Si include_merchant es True, agrega por ubicación del comerciante en lugar de usuario.
+    Aggregates transactions by location and category.
+    If include_merchant is True, aggregates by merchant location instead of user.
     """
     if include_merchant:
         lat_col = 'merchant_latitude'
@@ -89,28 +89,28 @@ def aggregate_by_location(df, lat_col='latitude', lon_col='longitude', include_m
 
 def find_nearby_merchants(df, user_lat, user_lon, category, max_distance=5.0):
     """
-    Encuentra comercios cercanos a una ubicación dada que pertenecen a una categoría específica.
+    Finds merchants near a given location that belong to a specific category.
     
     Args:
-        df: DataFrame con datos de transacciones
-        user_lat: Latitud del usuario
-        user_lon: Longitud del usuario
-        category: Categoría de comercio a buscar
-        max_distance: Distancia máxima en kilómetros
+        df: DataFrame with transaction data
+        user_lat: User's latitude
+        user_lon: User's longitude
+        category: Merchant category to search for
+        max_distance: Maximum distance in kilometers
         
     Returns:
-        DataFrame con comercios cercanos ordenados por precio (más barato primero)
+        DataFrame with nearby merchants ordered by price (cheapest first)
     """
-    # Filtrar por categoría
+    # Filter by category
     category_df = df[df['merchant_category'] == category]
     
-    # Agrupar por comerciante para obtener precio promedio
+    # Group by merchant to get average price
     merchants = category_df.groupby(['merchant_name', 'merchant_latitude', 'merchant_longitude']).agg(
         avg_price=('amount', 'mean'),
         transaction_count=('amount', 'count')
     ).reset_index()
     
-    # Calcular distancia desde la ubicación del usuario a cada comerciante
+    # Calculate distance from the user's location to each merchant
     merchants['distance_from_user'] = merchants.apply(
         lambda row: calculate_distance(
             (user_lat, user_lon),
@@ -119,13 +119,13 @@ def find_nearby_merchants(df, user_lat, user_lon, category, max_distance=5.0):
         axis=1
     )
     
-    # Filtrar por distancia máxima y ordenar por precio
+    # Filter by maximum distance and sort by price
     nearby = merchants[merchants['distance_from_user'] <= max_distance].sort_values('avg_price')
     
     return nearby
 
 def aggregate_by_time_location(df, time_period='month'):
-    """Agrega datos por ubicación y período de tiempo"""
+    """Aggregates data by location and time period"""
     if time_period == 'month':
         time_col = 'month'
     elif time_period == 'day_of_week':
@@ -145,16 +145,16 @@ def aggregate_by_time_location(df, time_period='month'):
 
 def compare_locations(df, radius=0.01):
     """
-    Compara gastos entre diferentes zonas geográficas
-    radius: radio en grados para considerar ubicaciones cercanas
+    Compares spending between different geographic areas
+    radius: radius in degrees to consider nearby locations
     """
-    # Creamos clusters aproximados basados en cercanía geográfica
+    # Create approximate clusters based on geographic proximity
     df['location_cluster'] = (
         (df['latitude'] * 100).astype(int) / 100 * 1000 + 
         (df['longitude'] * 100).astype(int) / 100
     )
     
-    # Análisis por cluster
+    # Analysis by cluster
     cluster_analysis = df.groupby('location_cluster').agg(
         avg_spent=('amount', 'mean'),
         total_spent=('amount', 'sum'),

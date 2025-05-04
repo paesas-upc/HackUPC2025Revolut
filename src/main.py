@@ -5,43 +5,43 @@ import pandas as pd
 from datetime import datetime
 import os
 
-# Importamos app.py como módulo para mantener la separación de código
+# Import app.py as a module to maintain code separation
 import app
 
-# Configuración de la página
+# Page configuration
 st.set_page_config(
     page_title="Spending Map AI - Login", 
     page_icon="🗺️",
     layout="centered"
 )
 
-# Inicialización de la sesión si no existe
+# Session initialization if it doesn't exist
 if "authenticated" not in st.session_state:
     st.session_state.authenticated = False
     st.session_state.user_first_name = ""
     st.session_state.user_last_name = ""
     st.session_state.user_full_name = ""
 
-# Función para verificar si el usuario existe en el dataset
+# Function to verify if the user exists in the dataset
 def verify_user(first_name, last_name):
     try:
-        # Cargamos solo las columnas necesarias para verificar usuarios
+        # Load only the necessary columns to verify users
         df = pd.read_csv("data/transactions.csv", usecols=["first", "last"])
         
-        # Convertimos a minúsculas para comparación insensible a mayúsculas
+        # Convert to lowercase for case-insensitive comparison
         df["first"] = df["first"].str.lower()
         df["last"] = df["last"].str.lower()
         
-        # Verificamos si la combinación existe
+        # Verify if the combination exists
         exists = ((df["first"] == first_name.lower()) & 
                  (df["last"] == last_name.lower())).any()
         
         return exists
     except Exception as e:
-        st.error(f"Error al verificar usuario: {str(e)}")
+        st.error(f"Error verifying user: {str(e)}")
         return False
 
-# Función de login
+# Login function
 def login_user():
     if st.session_state.first_name and st.session_state.last_name:
         if verify_user(st.session_state.first_name, st.session_state.last_name):
@@ -49,55 +49,55 @@ def login_user():
             st.session_state.user_first_name = st.session_state.first_name
             st.session_state.user_last_name = st.session_state.last_name
             st.session_state.user_full_name = f"{st.session_state.first_name} {st.session_state.last_name}"
-            st.success("¡Acceso concedido!")
-            # Necesitamos rerun para actualizar la UI
+            st.success("Access granted!")
+            # We need to rerun to update the UI
             st.rerun()
         else:
-            st.error("Usuario no encontrado. Por favor, verifica tu nombre y apellido.")
+            st.error("User not found. Please verify your first and last name.")
 
-# Función de cierre de sesión
+# Logout function
 def logout_user():
     for key in ["authenticated", "user_first_name", "user_last_name", "user_full_name"]:
         st.session_state[key] = ""
     st.session_state.authenticated = False
     st.rerun()
 
-# Interfaz principal
+# Main interface
 if not st.session_state.authenticated:
-    # Pantalla de login
+    # Login screen
     st.title("🗺️ Spending Map AI")
-    st.subheader("Visualiza y analiza tus gastos geográficamente")
+    st.subheader("Visualize and analyze your spending geographically")
     
     col1, col2 = st.columns(2)
     
     with col1:
-        st.text_input("Nombre", key="first_name", placeholder="Ingresa tu nombre")
+        st.text_input("First Name", key="first_name", placeholder="Enter your first name")
     
     with col2:
-        st.text_input("Apellido", key="last_name", placeholder="Ingresa tu apellido")
+        st.text_input("Last Name", key="last_name", placeholder="Enter your last name")
     
-    st.button("Acceder", on_click=login_user)
+    st.button("Login", on_click=login_user)
     
-    # Información adicional
-    with st.expander("ℹ️ Información"):
+    # Additional information
+    with st.expander("ℹ️ Information"):
         st.write("""
-        **Spending Map AI** te permite visualizar tus transacciones en un mapa interactivo,
-        analizar tus patrones de gasto por ubicación, y obtener recomendaciones personalizadas
-        para optimizar tus finanzas.
+        **Spending Map AI** allows you to visualize your transactions on an interactive map,
+        analyze your spending patterns by location, and get personalized recommendations
+        to optimize your finances.
         
-        Para acceder, ingresa tu nombre y apellido asociados a tu cuenta.
+        To access, enter your first and last name associated with your account.
         """)
     
-    # Usuarios de demostración
-    with st.expander("👤 Usuarios de demostración"):
+    # Demo users
+    with st.expander("👤 Demo Users"):
         st.info("""
-        Para probar la aplicación, puedes usar cualquiera de los siguientes usuarios:
+        To test the application, you can use any of the following users:
         
-        - Nombre: John, Apellido: Doe
-        - Nombre: Jane, Apellido: Smith
-        - Nombre: Michael, Apellido: Johnson
+        - First Name: John, Last Name: Doe
+        - First Name: Jane, Last Name: Smith
+        - First Name: Michael, Last Name: Johnson
         
-        (Nota: estos usuarios solo funcionarán si existen en tu dataset)
+        (Note: these users will only work if they exist in your dataset)
         """)
         
     # Footer
@@ -105,11 +105,11 @@ if not st.session_state.authenticated:
     st.caption("HackUPC 2025 - Revolut Challenge | paesas-upc")
     
 else:
-    # Si está autenticado, mostrar la aplicación principal
-    st.sidebar.success(f"👤 Sesión activa: {st.session_state.user_full_name.title()}")
-    st.sidebar.button("Cerrar sesión", on_click=logout_user)
+    # If authenticated, show the main application
+    st.sidebar.success(f"👤 Active session: {st.session_state.user_full_name.title()}")
+    st.sidebar.button("Logout", on_click=logout_user)
     
-    # Ejecutamos la aplicación principal pasando la información de usuario
+    # Run the main application passing the user information
     app.main(
         user_first_name=st.session_state.user_first_name,
         user_last_name=st.session_state.user_last_name
