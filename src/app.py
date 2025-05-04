@@ -2,7 +2,7 @@
 
 import streamlit as st
 import folium
-from folium.plugins import MarkerCluster, HeatMap
+from folium.plugins import MarkerCluster
 import pandas as pd
 import numpy as np
 import random
@@ -113,7 +113,7 @@ def main(user_first_name=None, user_last_name=None):
     else:
         # Intentar clustering con una configuración más permisiva
         try:
-            clustered_df = cluster_locations(filtered_df, min_cluster_size=min(3, len(filtered_df)))
+            clustered_df = cluster_locations(filtered_df, min_cluster_size=6)
         except Exception as e:
             st.error(f"Error al procesar clusters: {str(e)}")
             filtered_df['cluster'] = 0
@@ -126,17 +126,10 @@ def main(user_first_name=None, user_last_name=None):
         st.header("🗺️ Mapa de gastos")
         
         # Tabs para diferentes tipos de visualización
-        map_tab, heatmap_tab, stats_tab = st.tabs(["Mapa de marcadores", "Mapa de calor", "Estadísticas"])
+        map_tab, stats_tab = st.tabs(["Mapa de marcadores", "Estadísticas"])
         
         with map_tab:
             st.subheader("Mapa de transacciones")
-            
-            # Opción para mostrar ubicaciones de usuario, comercio
-            show_option = st.radio(
-                "Mostrar ubicaciones de:",
-                ["Usuario", "Comercios"],
-                horizontal=True
-            )
             
             # Verificar si tenemos coordenadas de comerciantes
             has_merchant_coords = ('merchant_latitude' in filtered_df.columns and 
@@ -144,9 +137,8 @@ def main(user_first_name=None, user_last_name=None):
                                 'merchant_longitude' in filtered_df.columns and 
                                 filtered_df['merchant_longitude'].notna().any())
             
-            if not has_merchant_coords and show_option in ["Comercios"]:
+            if not has_merchant_coords:
                 st.warning("No hay coordenadas de comercios disponibles en los datos.")
-                show_option = "Usuario"
             
             # Mapa base
             center = [filtered_df['latitude'].mean(), filtered_df['longitude'].mean()]
@@ -157,37 +149,31 @@ def main(user_first_name=None, user_last_name=None):
             cat_colors = {cat: color for cat, color in zip(categories, get_distinct_colors(len(categories)))}
             
             # Crear grupos de marcadores para usuario y comercios
-            user_marker_cluster = MarkerCluster(name="Ubicaciones de usuario").add_to(m)
+            user_marker = folium.FeatureGroup(name="Ubicación de usuario").add_to(m)
             merchant_marker_cluster = MarkerCluster(name="Ubicaciones de comercios").add_to(m)
             
-            # Mostrar ubicaciones de usuario
-            if show_option in ["Usuario"]:
-                # Agregación por ubicación de usuario
-                user_agg = aggregate_by_location(filtered_df, include_merchant=False)
-                
-                for _, row in user_agg.iterrows():
-                    popup = f"""
-                    <b>Categoría:</b> {row['merchant_category']}<br>
-                    <b>Total gastado:</b> ${row['total_spent']:.2f}<br>
-                    <b>Gasto promedio:</b> ${row['avg_spent']:.2f}<br>
-                    <b>Transacciones:</b> {row['transaction_count']}
-                    """
-                    
-                    # Color basado en categoría
-                    color = cat_colors.get(row['merchant_category'], 'blue')
-                    
-                    # Usar un ícono de persona para el usuario
-                    folium.Marker(
-                        location=[row['latitude'], row['longitude']],
-                        popup=popup,
-                        icon=folium.Icon(color="blue", icon="user", prefix="fa"),
-                        tooltip=f"Usuario - {row['merchant_category']}: ${row['total_spent']:.2f}"
-                    ).add_to(user_marker_cluster)
+            # Obtener la ubicación única del usuario (promedio de sus coordenadas)
+            user_location = [filtered_df['latitude'].mean(), filtered_df['longitude'].mean()]
             
-            # Mostrar ubicaciones de comercios
-            if show_option in ["Comercios"] and has_merchant_coords:
+            # Añadir marcador del usuario
+            folium.Marker(
+                location=user_location,
+                popup="<b>Usuario</b>",
+                icon=folium.Icon(color="blue", icon="user", prefix="fa"),
+                tooltip="Ubicación del usuario"
+            ).add_to(user_marker)
+            
+            # Mostrar ubicaciones de comercios si hay datos disponibles
+            if has_merchant_coords:
                 # Agregación por ubicación de comercio
-                merchant_agg = aggregate_by_location(filtered_df, include_merchant=True)
+                merchant_df = filtered_df.dropna(subset=['merchant_latitude', 'merchant_longitude'])
+                
+                # Agrupar por ubicación de comercio
+                merchant_agg = merchant_df.groupby(['merchant_latitude', 'merchant_longitude', 'merchant_category']).agg(
+                    total_spent=('amount', 'sum'),
+                    avg_spent=('amount', 'mean'),
+                    transaction_count=('amount', 'count')
+                ).reset_index()
                 
                 for _, row in merchant_agg.iterrows():
                     popup = f"""
@@ -200,9 +186,11 @@ def main(user_first_name=None, user_last_name=None):
                     # Color basado en categoría
                     color = cat_colors.get(row['merchant_category'], 'red')
                     
+                    merchant_location = [row['merchant_latitude'], row['merchant_longitude']]
+                    
                     # Usar un ícono de tienda para los comercios
                     folium.Marker(
-                        location=[row['merchant_latitude'], row['merchant_longitude']],
+                        location=merchant_location,
                         popup=popup,
                         icon=folium.Icon(color="red", icon="shopping-cart", prefix="fa"),
                         tooltip=f"Comercio - {row['merchant_category']}: ${row['total_spent']:.2f}"
@@ -212,24 +200,8 @@ def main(user_first_name=None, user_last_name=None):
             folium.LayerControl().add_to(m)
             
             # Mostrar el mapa
-            st.write("El mapa muestra ubicaciones de usuarios (azul) y comercios (rojo). Las líneas conectan al usuario con los comercios donde realizó transacciones.")
+            st.write("El mapa muestra la ubicación única del usuario (azul) y los comercios donde realizó transacciones (rojo). Las líneas conectan al usuario con cada comercio.")
             folium_static(m)
-        
-        with heatmap_tab:
-            st.write("Mapa de calor que muestra la intensidad de gasto por zona")
-            
-            # Mapa de calor basado en cantidad de gasto
-            heat_data = [[row['latitude'], row['longitude'], row['amount']] for _, row in filtered_df.iterrows()]
-            
-            # Mapa base
-            center = [filtered_df['latitude'].mean(), filtered_df['longitude'].mean()]
-            heat_map = folium.Map(location=center, zoom_start=13)
-            
-            # Añadir capa de calor
-            HeatMap(heat_data, radius=15).add_to(heat_map)
-            
-            # Mostrar el mapa
-            folium_static(heat_map)
         
         with stats_tab:
             st.subheader("Estadísticas de gastos")
@@ -267,50 +239,56 @@ def main(user_first_name=None, user_last_name=None):
         # pero destacamos la información del usuario actual
         if user_first_name and user_last_name:
             # Aplicar clustering a todos los datos
-            all_clustered_df = cluster_locations(all_data_df, min_cluster_size=5)
+            all_clustered_df = cluster_locations(all_data_df, min_cluster_size=6)
             
             # Identificar los clusters a los que pertenece el usuario
             user_mask = (
                 (all_data_df["first"].str.lower() == user_first_name.lower()) & 
                 (all_data_df["last"].str.lower() == user_last_name.lower())
             )
-            user_raw_df = all_data_df[user_mask]
+            user_raw_df = all_data_df[user_mask].copy()
             
             # Asignar usuarios a clusters basados en la proximidad
             user_points = user_raw_df[['latitude', 'longitude']].values
             all_clusters = all_clustered_df[all_clustered_df['cluster'] >= 0]
             
-            if len(user_points) > 0 and not all_clusters.empty:
-                user_clusters = set()
-                for _, user_point in enumerate(user_points):
-                    # Buscar el cluster más cercano para cada punto del usuario
-                    min_dist = float('inf')
-                    closest_cluster = None
-                    
-                    for cluster_id in all_clusters['cluster'].unique():
-                        cluster_points = all_clustered_df[all_clustered_df['cluster'] == cluster_id]
-                        cluster_center = (
-                            cluster_points['latitude'].mean(),
-                            cluster_points['longitude'].mean()
-                        )
-                        
-                        # Calcular distancia euclidiana simple
-                        dist = np.sqrt(
-                            (user_point[0] - cluster_center[0])**2 + 
-                            (user_point[1] - cluster_center[1])**2
-                        )
-                        
-                        if dist < min_dist:
-                            min_dist = dist
-                            closest_cluster = cluster_id
-                    
-                    if closest_cluster is not None:
-                        user_clusters.add(closest_cluster)
+            # Añadir columna de cluster al dataframe del usuario si no existe
+            if 'cluster' not in user_raw_df.columns:
+                user_raw_df['cluster'] = -1  # Valor predeterminado (ruido)
+            
+            user_clusters = set()
+            # Para cada punto del usuario, asignar al cluster más cercano
+            for i, row in user_raw_df.iterrows():
+                user_point = [row['latitude'], row['longitude']]
                 
-                # Convertir a lista para usar más adelante
-                user_clusters = sorted(list(user_clusters))
-            else:
-                user_clusters = []
+                # Buscar el cluster más cercano para cada punto del usuario
+                min_dist = float('inf')
+                closest_cluster = None
+                
+                for cluster_id in all_clusters['cluster'].unique():
+                    cluster_points = all_clustered_df[all_clustered_df['cluster'] == cluster_id]
+                    cluster_center = (
+                        cluster_points['latitude'].mean(),
+                        cluster_points['longitude'].mean()
+                    )
+                    
+                    # Calcular distancia euclidiana simple
+                    dist = np.sqrt(
+                        (user_point[0] - cluster_center[0])**2 + 
+                        (user_point[1] - cluster_center[1])**2
+                    )
+                    
+                    if dist < min_dist:
+                        min_dist = dist
+                        closest_cluster = cluster_id
+                
+                if closest_cluster is not None:
+                    # Asignar el cluster a este punto del usuario
+                    user_raw_df.at[i, 'cluster'] = closest_cluster
+                    user_clusters.add(closest_cluster)
+            
+            # Convertir a lista para usar más adelante
+            user_clusters = sorted(list(user_clusters))
             
             # Analizar los clusters
             cluster_stats = analyze_clusters(all_clustered_df)
@@ -443,10 +421,8 @@ def main(user_first_name=None, user_last_name=None):
             
             # Datos del usuario en este cluster (si existe)
             if user_first_name:
-                user_cluster_data = cluster_data[
-                    (cluster_data['first'].str.lower() == user_first_name.lower()) &
-                    (cluster_data['last'].str.lower() == user_last_name.lower())
-                ]
+                # CAMBIO CLAVE: Usar la asignación de cluster que calculamos antes
+                user_cluster_data = user_raw_df[user_raw_df['cluster'] == selected_cluster]
                 has_user_data = not user_cluster_data.empty
             else:
                 user_cluster_data = pd.DataFrame()
@@ -480,330 +456,6 @@ def main(user_first_name=None, user_last_name=None):
                     user_avg = user_cluster_data['amount'].mean()
                     avg_diff = ((user_avg / cluster_data['amount'].mean()) - 1) * 100
                     st.metric("Tu gasto promedio", f"${user_avg:.2f}", f"{avg_diff:+.1f}% vs promedio")
-            
-            # Distribución de categorías en el cluster
-            st.subheader(f"Categorías en la Zona {selected_cluster}")
-            
-            # Para todos los usuarios
-            cat_dist = cluster_data['merchant_category'].value_counts().reset_index()
-            cat_dist.columns = ['merchant_category', 'count']
-            
-            # Para el usuario actual (si hay datos)
-            if has_user_data:
-                user_cat_dist = user_cluster_data['merchant_category'].value_counts().reset_index()
-                user_cat_dist.columns = ['merchant_category', 'count']
-                
-                # Combinar los dataframes
-                cat_dist['tipo'] = 'Todos los usuarios'
-                user_cat_dist['tipo'] = 'Tus transacciones'
-                combined_cat_dist = pd.concat([cat_dist, user_cat_dist])
-                
-                # Gráfico combinado
-                fig_pie = px.pie(
-                    combined_cat_dist,
-                    names='merchant_category',
-                    values='count',
-                    facet_col='tipo',
-                    title=f'Distribución de categorías en Zona {selected_cluster}'
-                )
-                st.plotly_chart(fig_pie)
-            else:
-                # Solo datos generales
-                fig_pie = px.pie(
-                    cat_dist,
-                    names='merchant_category',
-                    values='count',
-                    title=f'Distribución de categorías en Zona {selected_cluster}'
-                )
-                st.plotly_chart(fig_pie)
-            
-            # Evolución temporal si hay suficientes datos
-            if len(cluster_data['date'].unique()) > 1:
-                st.subheader(f"Evolución temporal del gasto en Zona {selected_cluster}")
-                
-                # Datos de todos
-                time_data = cluster_data.groupby('date')['amount'].sum().reset_index()
-                time_data['tipo'] = 'Todos los usuarios'
-                
-                if has_user_data and len(user_cluster_data['date'].unique()) > 1:
-                    # Datos del usuario
-                    user_time_data = user_cluster_data.groupby('date')['amount'].sum().reset_index()
-                    user_time_data['tipo'] = 'Tus transacciones'
-                    
-                    # Combinar
-                    combined_time_data = pd.concat([time_data, user_time_data])
-                    
-                    fig_time = px.line(
-                        combined_time_data,
-                        x='date',
-                        y='amount',
-                        color='tipo',
-                        title=f'Evolución temporal del gasto en Zona {selected_cluster}',
-                        labels={'date': 'Fecha', 'amount': 'Monto total ($)', 'tipo': ''}
-                    )
-                    st.plotly_chart(fig_time)
-                else:
-                    # Solo datos generales
-                    fig_time = px.line(
-                        time_data,
-                        x='date',
-                        y='amount',
-                        title=f'Evolución temporal del gasto en Zona {selected_cluster}',
-                        labels={'date': 'Fecha', 'amount': 'Monto total ($)'}
-                    )
-                    st.plotly_chart(fig_time)
-            
-            # Insights sobre la zona
-            st.subheader("Insights de la zona")
-            
-            # Comparar con el promedio global
-            avg_global = all_data_df['amount'].mean()
-            avg_cluster = cluster_data['amount'].mean()
-            diff_pct = ((avg_cluster - avg_global) / avg_global) * 100
-            
-            if diff_pct > 0:
-                st.info(f"En esta zona se gasta en promedio un {diff_pct:.1f}% más que el promedio global.")
-            else:
-                st.info(f"En esta zona se gasta en promedio un {abs(diff_pct):.1f}% menos que el promedio global.")
-            
-            # Si hay datos del usuario, comparar con el promedio de la zona
-            if has_user_data:
-                user_avg = user_cluster_data['amount'].mean()
-                user_zone_diff = ((user_avg - avg_cluster) / avg_cluster) * 100
-                
-                if user_zone_diff > 0:
-                    st.info(f"Tu gasto promedio en esta zona es un {user_zone_diff:.1f}% mayor que el de otros usuarios.")
-                else:
-                    st.info(f"Tu gasto promedio en esta zona es un {abs(user_zone_diff):.1f}% menor que el de otros usuarios.")
-            
-            # Identificar momento del día con mayor gasto en esta zona
-            if 'time_of_day' in cluster_data.columns:
-                time_spending = cluster_data.groupby('time_of_day')['amount'].mean()
-                peak_time = time_spending.idxmax()
-                st.info(f"En esta zona, los usuarios tienden a gastar más durante la {peak_time}.")
-                
-                if has_user_data and 'time_of_day' in user_cluster_data.columns:
-                    user_time_spending = user_cluster_data.groupby('time_of_day')['amount'].mean()
-                    if not user_time_spending.empty:
-                        user_peak_time = user_time_spending.idxmax()
-                        st.info(f"Tú en particular tiendes a gastar más en esta zona durante la {user_peak_time}.")
-                    
-            # Análisis de distancia si hay datos disponibles
-            if 'distance_to_merchant' in all_clustered_df.columns:
-                st.subheader("Análisis de desplazamiento")
-                
-                # Calcular distancia promedio por cluster
-                if 'distance_to_merchant' in cluster_data.columns:
-                    avg_distance = cluster_data['distance_to_merchant'].mean()
-                    if not pd.isna(avg_distance):
-                        st.metric("Distancia promedio a comercios", f"{avg_distance:.2f} km")
-                        
-                        if has_user_data and 'distance_to_merchant' in user_cluster_data.columns:
-                            user_avg_distance = user_cluster_data['distance_to_merchant'].mean()
-                            if not pd.isna(user_avg_distance):
-                                dist_diff = user_avg_distance - avg_distance
-                                st.metric(
-                                    "Tu distancia promedio", 
-                                    f"{user_avg_distance:.2f} km",
-                                    f"{dist_diff:+.2f} km vs promedio"
-                                )
-                    
-                # Análisis de distancia por categoría
-                st.write("**Distancia promedio por categoría:**")
-                
-                cat_distances = cluster_data.groupby('merchant_category')['distance_to_merchant'].mean().reset_index()
-                cat_distances = cat_distances.sort_values('distance_to_merchant', ascending=False)
-                
-                if not cat_distances.empty and not cat_distances['distance_to_merchant'].isna().all():
-                    fig_cat_dist = px.bar(
-                        cat_distances,
-                        x='merchant_category',
-                        y='distance_to_merchant',
-                        title='Distancia promedio recorrida por categoría',
-                        labels={'merchant_category': 'Categoría', 'distance_to_merchant': 'Distancia promedio (km)'}
-                    )
-                    st.plotly_chart(fig_cat_dist)
-        else:
-            # Si no hay usuario específico, usamos el clustering normal
-            if clustered_df['cluster'].nunique() > 1:
-                st.write(f"Se han identificado {clustered_df[clustered_df['cluster'] >= 0]['cluster'].nunique()} zonas distintas de gasto.")
-                
-                # Mostrar mapa con clusters coloreados
-                center = [filtered_df['latitude'].mean(), filtered_df['longitude'].mean()]
-                cluster_map = folium.Map(location=center, zoom_start=12)
-                
-                # Colores para los clusters
-                cluster_ids = sorted([c for c in clustered_df['cluster'].unique() if c >= 0])
-                n_clusters = len(cluster_ids)
-                colors = get_distinct_colors(n_clusters)
-                cluster_colors = {cid: colors[i] for i, cid in enumerate(cluster_ids)}
-                
-                # Agrupar puntos por cluster
-                for cluster_id in cluster_ids:
-                    cluster_points = clustered_df[clustered_df['cluster'] == cluster_id]
-                    
-                    # Calcular centro del cluster
-                    cluster_center = [
-                        cluster_points['latitude'].mean(), 
-                        cluster_points['longitude'].mean()
-                    ]
-                    
-                    # Estadísticas del cluster
-                    total_spent = cluster_points['amount'].sum()
-                    avg_spent = cluster_points['amount'].mean()
-                    transaction_count = len(cluster_points)
-                    top_category = cluster_points['merchant_category'].value_counts().index[0]
-                    
-                    # Añadir círculo para el cluster
-                    folium.Circle(
-                        location=cluster_center,
-                        radius=100,  # metros
-                        color=cluster_colors.get(cluster_id, 'gray'),
-                        fill=True,
-                        fill_opacity=0.4,
-                        tooltip=f"Zona {cluster_id}: ${total_spent:.2f} ({transaction_count} transacciones)"
-                    ).add_to(cluster_map)
-                    
-                    # Añadir etiqueta
-                    folium.Marker(
-                        location=cluster_center,
-                        icon=folium.DivIcon(
-                            html=f'<div style="font-size: 12pt; color: black; font-weight: bold;">Zona {cluster_id}</div>'
-                        )
-                    ).add_to(cluster_map)
-                
-                # Mostrar el mapa
-                st.write("Zonas identificadas mediante agrupamiento geográfico:")
-                folium_static(cluster_map)
-                
-                # Análisis comparativo entre zonas
-                st.subheader("Comparativa entre zonas")
-                
-                # Preparar datos para el gráfico
-                compare_data = cluster_stats[['cluster', 'avg_spent', 'total_spent', 'transaction_count', 'dominant_category']]
-                compare_data = compare_data.sort_values('total_spent', ascending=False)
-                
-                # Gráfico de barras comparativo
-                fig = px.bar(
-                    compare_data,
-                    x='cluster',
-                    y='total_spent',
-                    color='dominant_category',
-                    title='Gasto total por zona',
-                    labels={'cluster': 'Zona', 'total_spent': 'Monto total ($)', 'dominant_category': 'Categoría dominante'}
-                )
-                st.plotly_chart(fig)
-                
-                # Resto del código original para el análisis detallado de zonas...
-                # (mantener el mismo código que ya tenías para el caso sin usuario específico)
-                
-                # Análisis detallado de una zona específica
-                st.subheader("Análisis detallado por zona")
-                
-                selected_cluster = st.selectbox(
-                    "Selecciona una zona para analizar en detalle:",
-                    options=cluster_ids,
-                    format_func=lambda x: f"Zona {x}"
-                )
-                
-                # Filtrar datos para el cluster seleccionado
-                cluster_data = clustered_df[clustered_df['cluster'] == selected_cluster]
-                
-                # Estadísticas del cluster
-                col1, col2, col3 = st.columns(3)
-                with col1:
-                    st.metric("Total gastado", f"${cluster_data['amount'].sum():.2f}")
-                with col2:
-                    st.metric("Transacciones", f"{len(cluster_data)}")
-                with col3:
-                    st.metric("Gasto promedio", f"${cluster_data['amount'].mean():.2f}")
-                
-                # Distribución de categorías en el cluster
-                cat_dist = cluster_data['merchant_category'].value_counts().reset_index()
-                cat_dist.columns = ['merchant_category', 'count']
-                
-                fig_pie = px.pie(
-                    cat_dist,
-                    names='merchant_category',
-                    values='count',
-                    title=f'Distribución de categorías en Zona {selected_cluster}'
-                )
-                st.plotly_chart(fig_pie)
-                
-                # Evolución temporal si hay suficientes datos
-                if len(cluster_data['date'].unique()) > 1:
-                    time_data = cluster_data.groupby('date')['amount'].sum().reset_index()
-                    
-                    fig_time = px.line(
-                        time_data,
-                        x='date',
-                        y='amount',
-                        title=f'Evolución temporal del gasto en Zona {selected_cluster}',
-                        labels={'date': 'Fecha', 'amount': 'Monto total ($)'}
-                    )
-                    st.plotly_chart(fig_time)
-                
-                # Insights sobre la zona
-                st.subheader("Insights de la zona")
-                
-                # Comparar con el promedio global
-                avg_global = filtered_df['amount'].mean()
-                avg_cluster = cluster_data['amount'].mean()
-                diff_pct = ((avg_cluster - avg_global) / avg_global) * 100
-                
-                if diff_pct > 0:
-                    st.info(f"En esta zona gastas en promedio un {diff_pct:.1f}% más que tu promedio global.")
-                else:
-                    st.info(f"En esta zona gastas en promedio un {abs(diff_pct):.1f}% menos que tu promedio global.")
-                
-                # Identificar momento del día con mayor gasto en esta zona
-                if 'time_of_day' in cluster_data.columns:
-                    time_spending = cluster_data.groupby('time_of_day')['amount'].mean()
-                    peak_time = time_spending.idxmax()
-                    st.info(f"En esta zona, tiendes a gastar más durante la {peak_time}.")
-                    
-                # Análisis de distancia por zona
-                if 'cluster' in clustered_df.columns and clustered_df['cluster'].nunique() > 1 and 'distance_to_merchant' in filtered_df.columns:
-                    st.subheader("Análisis de desplazamiento")
-                    
-                    # Calcular distancia promedio por cluster
-                    cluster_distances = clustered_df.groupby('cluster')['distance_to_merchant'].mean().reset_index()
-                    cluster_distances = cluster_distances[cluster_distances['cluster'] >= 0]  # Filtrar ruido (-1)
-                    
-                    if not cluster_distances.empty and not cluster_distances['distance_to_merchant'].isna().all():
-                        # Gráfico de barras de distancia por zona
-                        fig_dist = px.bar(
-                            cluster_distances,
-                            x='cluster',
-                            y='distance_to_merchant',
-                            title='Distancia promedio a comercios por zona',
-                            labels={'cluster': 'Zona', 'distance_to_merchant': 'Distancia promedio (km)'}
-                        )
-                        st.plotly_chart(fig_dist)
-                        
-                        # Identificar zona con mayor y menor distancia
-                        max_dist_zone = cluster_distances.loc[cluster_distances['distance_to_merchant'].idxmax()]
-                        min_dist_zone = cluster_distances.loc[cluster_distances['distance_to_merchant'].idxmin()]
-                        
-                        st.info(f"En la Zona {max_dist_zone['cluster']}, te desplazas en promedio {max_dist_zone['distance_to_merchant']:.2f} km para comprar, mientras que en la Zona {min_dist_zone['cluster']} solo te desplazas {min_dist_zone['distance_to_merchant']:.2f} km.")
-                    
-                    # Análisis de distancia por categoría
-                    st.write("**Distancia promedio por categoría:**")
-                    
-                    cat_distances = filtered_df.groupby('merchant_category')['distance_to_merchant'].mean().reset_index()
-                    cat_distances = cat_distances.sort_values('distance_to_merchant', ascending=False)
-                    
-                    if not cat_distances.empty and not cat_distances['distance_to_merchant'].isna().all():
-                        fig_cat_dist = px.bar(
-                            cat_distances,
-                            x='merchant_category',
-                            y='distance_to_merchant',
-                            title='Distancia promedio recorrida por categoría',
-                            labels={'merchant_category': 'Categoría', 'distance_to_merchant': 'Distancia promedio (km)'}
-                        )
-                        st.plotly_chart(fig_cat_dist)
-            else:
-                st.warning("No se han detectado suficientes zonas distintas con tus datos actuales. Prueba a ajustar los filtros o añadir más transacciones.")
 
     elif view_option == "Recomendaciones":
         st.header("💡 Recomendaciones personalizadas")
@@ -968,18 +620,60 @@ def main(user_first_name=None, user_last_name=None):
             st.write("Para las predicciones, analizamos tendencias generales de todos los usuarios y las aplicamos a tu perfil personal.")
             
             # Aplicar clustering a todos los datos
-            all_clustered_df = cluster_locations(all_data_df, min_cluster_size=5)
+            all_clustered_df = cluster_locations(all_data_df, min_cluster_size=6)
             
-            # Pero filtramos para el usuario actual para las comparaciones personalizadas
+            # Identificar los datos del usuario
             user_mask = (
-                (all_clustered_df["first"].str.lower() == user_first_name.lower()) & 
-                (all_clustered_df["last"].str.lower() == user_last_name.lower())
+                (all_data_df["first"].str.lower() == user_first_name.lower()) & 
+                (all_data_df["last"].str.lower() == user_last_name.lower())
             )
-            user_clustered_df = all_clustered_df[user_mask]
+            user_raw_df = all_data_df[user_mask].copy()
+            
+            # Asignar usuarios a clusters basados en la proximidad
+            user_points = user_raw_df[['latitude', 'longitude']].values
+            all_clusters = all_clustered_df[all_clustered_df['cluster'] >= 0]
+            
+            # Añadir columna de cluster al dataframe del usuario si no existe
+            if 'cluster' not in user_raw_df.columns:
+                user_raw_df['cluster'] = -1  # Valor predeterminado (ruido)
+            
+            user_clusters = set()
+            # Para cada punto del usuario, asignar al cluster más cercano
+            for i, row in user_raw_df.iterrows():
+                user_point = [row['latitude'], row['longitude']]
+                
+                # Buscar el cluster más cercano para cada punto del usuario
+                min_dist = float('inf')
+                closest_cluster = None
+                
+                for cluster_id in all_clusters['cluster'].unique():
+                    cluster_points = all_clustered_df[all_clustered_df['cluster'] == cluster_id]
+                    cluster_center = (
+                        cluster_points['latitude'].mean(),
+                        cluster_points['longitude'].mean()
+                    )
+                    
+                    # Calcular distancia euclidiana simple
+                    dist = np.sqrt(
+                        (user_point[0] - cluster_center[0])**2 + 
+                        (user_point[1] - cluster_center[1])**2
+                    )
+                    
+                    if dist < min_dist:
+                        min_dist = dist
+                        closest_cluster = cluster_id
+                
+                if closest_cluster is not None:
+                    # Asignar el cluster a este punto del usuario
+                    user_raw_df.at[i, 'cluster'] = closest_cluster
+                    user_clusters.add(closest_cluster)
+            
+            # Convertir a lista para usar más adelante
+            user_clusters = sorted(list(user_clusters))
         else:
             # Sin usuario específico, usamos todos los datos
-            all_clustered_df = cluster_locations(all_data_df, min_cluster_size=5)
-            user_clustered_df = all_clustered_df
+            all_clustered_df = cluster_locations(all_data_df, min_cluster_size=6)
+            user_clusters = []
         
         # Simulaciones
         st.subheader("Simulaciones de escenarios")
@@ -992,11 +686,11 @@ def main(user_first_name=None, user_last_name=None):
             valid_clusters = [c for c in all_clustered_df['cluster'].unique() if c >= 0]
             
             # Determinar zonas actuales del usuario
-            if user_first_name and user_last_name:
-                user_zones = set(user_clustered_df['cluster'].unique())
-                other_zones = [z for z in valid_clusters if z not in user_zones]
+            if user_first_name and user_last_name and user_clusters:
+                # Usar los clusters asignados correctamente
+                other_zones = [z for z in valid_clusters if z not in user_clusters]
                 
-                if not user_zones or len(user_zones) == 0:
+                if not user_clusters:
                     st.warning("No tenemos suficientes datos para determinar tus zonas habituales.")
                     return
                     
@@ -1005,7 +699,7 @@ def main(user_first_name=None, user_last_name=None):
                 with col1:
                     current_zone = st.selectbox(
                         "Tu zona actual:",
-                        options=sorted(list(user_zones)),
+                        options=user_clusters,
                         format_func=lambda x: f"Zona {x}"
                     )
                 
@@ -1038,12 +732,10 @@ def main(user_first_name=None, user_last_name=None):
                 # Datos para la zona actual
                 current_data = all_clustered_df[all_clustered_df['cluster'] == current_zone]
                 
-                # Si hay usuario, filtramos los datos actuales para el usuario
+                # Si hay usuario, usamos los datos del usuario con el cluster asignado
                 if user_first_name and user_last_name:
-                    user_current_data = current_data[
-                        (current_data["first"].str.lower() == user_first_name.lower()) & 
-                        (current_data["last"].str.lower() == user_last_name.lower())
-                    ]
+                    # CAMBIO CLAVE: Usar la asignación de cluster que calculamos antes
+                    user_current_data = user_raw_df[user_raw_df['cluster'] == current_zone]
                     if not user_current_data.empty:
                         current_data = user_current_data
                     
