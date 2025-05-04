@@ -113,7 +113,7 @@ def main(user_first_name=None, user_last_name=None):
     else:
         # Intentar clustering con una configuración más permisiva
         try:
-            clustered_df = cluster_locations(filtered_df, min_cluster_size=6)
+            clustered_df = cluster_locations(filtered_df, min_cluster_size=5)
         except Exception as e:
             st.error(f"Error al procesar clusters: {str(e)}")
             filtered_df['cluster'] = 0
@@ -239,7 +239,7 @@ def main(user_first_name=None, user_last_name=None):
         # pero destacamos la información del usuario actual
         if user_first_name and user_last_name:
             # Aplicar clustering a todos los datos
-            all_clustered_df = cluster_locations(all_data_df, min_cluster_size=6)
+            all_clustered_df = cluster_locations(all_data_df, min_cluster_size=5)
             
             # Identificar los clusters a los que pertenece el usuario
             user_mask = (
@@ -620,7 +620,7 @@ def main(user_first_name=None, user_last_name=None):
             st.write("Para las predicciones, analizamos tendencias generales de todos los usuarios y las aplicamos a tu perfil personal.")
             
             # Aplicar clustering a todos los datos
-            all_clustered_df = cluster_locations(all_data_df, min_cluster_size=6)
+            all_clustered_df = cluster_locations(all_data_df, min_cluster_size=5)
             
             # Identificar los datos del usuario
             user_mask = (
@@ -672,7 +672,7 @@ def main(user_first_name=None, user_last_name=None):
             user_clusters = sorted(list(user_clusters))
         else:
             # Sin usuario específico, usamos todos los datos
-            all_clustered_df = cluster_locations(all_data_df, min_cluster_size=6)
+            all_clustered_df = cluster_locations(all_data_df, min_cluster_size=5)
             user_clusters = []
         
         # Simulaciones
