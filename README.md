@@ -49,5 +49,8 @@ source venv/bin/activate  # On Windows: venv\Scripts\activate
 # Install dependencies
 pip install -r requirements.txt
 
+# Login
+It can be used any First and Last name from the data base (ex: Michelle Anderson)
+
 # Run application
 streamlit run src/main.py
